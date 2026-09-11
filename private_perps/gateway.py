@@ -20,6 +20,7 @@ class GatewayResult:
     position_id: str | None = None
     commitment_hash: str | None = None
     settlement_id: str | None = None
+    settlement_delta: float | None = None
     rejection_reason: str | None = None
     proof_result: ProofVerificationResult | None = None
     liquidation_decision: LiquidationDecision | None = None
@@ -146,7 +147,7 @@ class PrivateOrderGateway:
         stages.append(LifecycleStage.ORDER_MATCHED)
         stages.append(LifecycleStage.EXECUTED)
 
-        _ = self._funding_engine.compute_delta(
+        funding_delta = self._funding_engine.compute_delta(
             size=intent.size,
             mark_price=oracle_observation.price,
             funding_rate_per_interval=funding_rate_per_interval,
@@ -155,12 +156,13 @@ class PrivateOrderGateway:
         liquidation_decision = self._liquidation_engine.evaluate(margin_result=margin, proof_result=proof_result)
 
         settlement_id = f"set-{intent.order_id}"
+        settlement_delta = (intent.size * oracle_observation.price) + funding_delta
         self._settlement_adapter.prepare_record(
             settlement_id=settlement_id,
             order_id=intent.order_id,
             account_id=intent.account_id,
             position_id=position_result.transition.position_id,
-            settlement_delta=intent.size * oracle_observation.price,
+            settlement_delta=settlement_delta,
             authority=intent.authority,
             commitment_hash=position_result.transition.commitment_hash,
             proof_id=proof_result.proof_id if proof_result else None,
@@ -175,6 +177,7 @@ class PrivateOrderGateway:
             position_id=position_result.transition.position_id,
             commitment_hash=position_result.transition.commitment_hash,
             settlement_id=settlement_id,
+            settlement_delta=settlement_delta,
             proof_result=proof_result,
             liquidation_decision=liquidation_decision,
         )

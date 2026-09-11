@@ -97,6 +97,7 @@ class PrivatePerpsPhase9Tests(unittest.TestCase):
         self.assertIn(LifecycleStage.PROOF_VERIFIED, result.stages)
         self.assertTrue(result.position_id)
         self.assertTrue(result.commitment_hash)
+        self.assertEqual(result.settlement_delta, (1.0 * 50000.0) + (1.0 * 50000.0 * 0.0001))
 
     def test_missing_authority_rejected(self):
         bad_intent = self.intent(authority=self.authority(mandateId=""))

@@ -5,4 +5,4 @@
 - Proof verification returns standardized status and reason codes.
 - If proof is absent or invalid for proof-required transitions, the workflow halts with `PROOF_FAILED`.
 - Verified proofs are required before confidential transition persistence and settlement preparation.
-- Private liquidation decisions are proof-aware and deterministic for workflows that reach liquidation evaluation.
+- In the current scaffold, liquidation evaluation is reached only after margin-valid paths, and under-margined paths are fail-closed earlier.

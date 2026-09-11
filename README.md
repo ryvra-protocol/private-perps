@@ -26,10 +26,10 @@ At rest, position/order payloads are stored as ciphertext plus commitments. Plai
 1. Intent received and authority refs validated.
 2. Oracle observation validated.
 3. Margin validated.
-4. Position transition persisted as encrypted version with commitment.
-5. Proof required transitions block until proof is provided and verified.
+4. Proof required transitions block until proof is provided and verified.
+5. Position transition persisted as encrypted version with commitment.
 6. Liquidation decision uses margin status and proof verification status.
-7. Settlement-prepared record emitted with intent/proof/commitment provenance.
+7. Settlement-prepared record emitted with intent/proof/commitment provenance and funding-adjusted delta.
 
 ## Integration points
 
