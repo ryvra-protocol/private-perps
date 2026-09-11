@@ -159,6 +159,17 @@ class PrivatePerpsPhase9Tests(unittest.TestCase):
         self.assertEqual(result.status, LifecycleStage.REJECTED)
         self.assertEqual(result.rejection_reason, "UNSUPPORTED_PRIVACY_MODE")
 
+    def test_private_execution_mode_rejected_for_confidential_gateway(self):
+        bad_intent = self.intent(authority=self.authority(executionMode=ExecutionMode.PRIVATE))
+        result = self.gateway.process_confidential_order(
+            intent=bad_intent,
+            oracle_observation=self.oracle(),
+            proof_id="proof-ok",
+            funding_rate_per_interval=0.0001,
+        )
+        self.assertEqual(result.status, LifecycleStage.REJECTED)
+        self.assertEqual(result.rejection_reason, "UNSUPPORTED_EXECUTION_MODE")
+
     def test_insufficient_margin_rejected(self):
         result = self.gateway.process_confidential_order(
             intent=self.intent(collateral=100.0),
@@ -221,6 +232,16 @@ class PrivatePerpsPhase9Tests(unittest.TestCase):
         )
         self.assertEqual(result.status, LifecycleStage.ORACLE_INVALID)
         self.assertEqual(result.rejection_reason, "ORACLE_LOW_CONFIDENCE")
+
+    def test_oracle_market_mismatch_rejected(self):
+        result = self.gateway.process_confidential_order(
+            intent=self.intent(market="BTC-PERP"),
+            oracle_observation=self.oracle(market="ETH-PERP"),
+            proof_id="proof-ok",
+            funding_rate_per_interval=0.0001,
+        )
+        self.assertEqual(result.status, LifecycleStage.ORACLE_INVALID)
+        self.assertEqual(result.rejection_reason, "ORACLE_MARKET_MISMATCH")
 
     def test_fallback_handling_rejected(self):
         result = self.gateway.process_confidential_order(

@@ -91,6 +91,13 @@ class PrivateOrderGateway:
                 stages=stages + [LifecycleStage.ORACLE_INVALID],
                 rejection_reason=str(exc),
             )
+        if oracle_observation.market != intent.market:
+            return GatewayResult(
+                order_id=intent.order_id,
+                status=LifecycleStage.ORACLE_INVALID,
+                stages=stages + [LifecycleStage.ORACLE_INVALID],
+                rejection_reason="ORACLE_MARKET_MISMATCH",
+            )
 
         try:
             margin: MarginResult = self._margin_engine.evaluate(intent)
@@ -103,21 +110,35 @@ class PrivateOrderGateway:
             )
         if not margin.is_sufficient:
             liquidation_proof_result = None
-            if intent.requires_proof and proof_id is not None:
-                liquidation_proof_result = self._proof_adapter.verify(
-                    proof_id=proof_id,
-                    proof_type="LIQUIDATION_SOLVENCY",
-                    commitment_hash=f"margin:{intent.order_id}",
-                )
+            if intent.requires_proof:
+                if proof_id is None:
+                    liquidation_proof_result = ProofVerificationResult(
+                        proof_id="missing",
+                        verifier=self._proof_adapter.verifier_name,
+                        status=VerificationStatus.REJECTED,
+                        reason_code="PROOF_REQUIRED",
+                        metadata={"proof_type": "LIQUIDATION_SOLVENCY"},
+                    )
+                else:
+                    liquidation_proof_result = self._proof_adapter.verify(
+                        proof_id=proof_id,
+                        proof_type="LIQUIDATION_SOLVENCY",
+                        commitment_hash=f"margin:{intent.order_id}",
+                    )
             liquidation_decision = self._liquidation_engine.evaluate(
                 margin_result=margin,
                 proof_result=liquidation_proof_result,
+            )
+            rejection_reason = (
+                liquidation_proof_result.reason_code
+                if liquidation_proof_result and liquidation_proof_result.status != VerificationStatus.VERIFIED
+                else "MARGIN_INSUFFICIENT"
             )
             return GatewayResult(
                 order_id=intent.order_id,
                 status=LifecycleStage.MARGIN_INSUFFICIENT,
                 stages=stages + [LifecycleStage.MARGIN_INSUFFICIENT],
-                rejection_reason="MARGIN_INSUFFICIENT",
+                rejection_reason=rejection_reason,
                 liquidation_decision=liquidation_decision,
                 proof_result=liquidation_proof_result,
             )

@@ -71,4 +71,4 @@ class InMemoryPrivateExecutionAdapter(ConfidentialComputeAdapter):
         return data.decode("utf-8")
 
     def is_authorized_to_decrypt(self, authorization_id: str, expected_authorization_id: str) -> bool:
-        return authorization_id == expected_authorization_id
+        return hmac.compare_digest(authorization_id, expected_authorization_id)
