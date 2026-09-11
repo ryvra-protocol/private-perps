@@ -123,12 +123,19 @@ class PrivateOrderGateway:
             )
         stages.append(LifecycleStage.MARGIN_VALIDATED)
 
-        position_payload = self._position_engine.build_payload(intent)
+        try:
+            position_payload = self._position_engine.build_payload(intent)
+        except ValueError as exc:
+            return GatewayResult(
+                order_id=intent.order_id,
+                status=LifecycleStage.REJECTED,
+                stages=stages + [LifecycleStage.REJECTED],
+                rejection_reason=str(exc),
+            )
         precomputed_commitment = self._position_engine.commitment_for_payload(position_payload)
 
         proof_result = None
         if intent.requires_proof:
-            stages.append(LifecycleStage.PROOF_GENERATED)
             if proof_id is None:
                 return GatewayResult(
                     order_id=intent.order_id,
@@ -138,6 +145,7 @@ class PrivateOrderGateway:
                     commitment_hash=precomputed_commitment,
                     rejection_reason="PROOF_REQUIRED",
                 )
+            stages.append(LifecycleStage.PROOF_GENERATED)
             proof_result = self._proof_adapter.verify(
                 proof_id=proof_id,
                 proof_type="POSITION_TRANSITION",

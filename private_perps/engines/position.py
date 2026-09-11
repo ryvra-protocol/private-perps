@@ -19,6 +19,12 @@ class PositionEngine:
 
     @staticmethod
     def build_payload(intent: TradeIntent) -> dict[str, float | str]:
+        if intent.side.upper() == "LONG":
+            liquidation_threshold = intent.entry_price * (1 - (1 / (intent.leverage + 1)))
+        elif intent.side.upper() == "SHORT":
+            liquidation_threshold = intent.entry_price * (1 + (1 / (intent.leverage + 1)))
+        else:
+            raise ValueError("UNSUPPORTED_SIDE")
         return {
             "position_id": f"pos-{intent.account_id}-{intent.market}",
             "account_id": intent.account_id,
@@ -29,7 +35,7 @@ class PositionEngine:
             "leverage": intent.leverage,
             "collateral": intent.collateral,
             "entry_price": intent.entry_price,
-            "liquidation_threshold": intent.entry_price * (1 - (1 / (intent.leverage + 1))),
+            "liquidation_threshold": liquidation_threshold,
         }
 
     @staticmethod

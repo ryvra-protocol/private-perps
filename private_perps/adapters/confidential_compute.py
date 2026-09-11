@@ -23,9 +23,11 @@ class ConfidentialComputeAdapter:
 @dataclass
 class InMemoryPrivateExecutionAdapter(ConfidentialComputeAdapter):
     provider: str = "private-execution:in-memory"
-    secret_key: str = "phase9-local-confidential-key"
+    secret_key: str | None = None
 
     def _keystream(self, nonce: bytes, length: int) -> bytes:
+        if not self.secret_key:
+            raise ValueError("MISSING_CONFIDENTIAL_COMPUTE_KEY")
         key = self.secret_key.encode("utf-8")
         out = bytearray()
         counter = 0
@@ -40,21 +42,26 @@ class InMemoryPrivateExecutionAdapter(ConfidentialComputeAdapter):
         nonce = secrets.token_bytes(16)
         keystream = self._keystream(nonce, len(data))
         encrypted = bytes(a ^ b for a, b in zip(data, keystream))
+        if not self.secret_key:
+            raise ValueError("MISSING_CONFIDENTIAL_COMPUTE_KEY")
         key = self.secret_key.encode("utf-8")
         mac = hmac.new(key, nonce + encrypted, hashlib.sha256).digest()
         payload = base64.b64encode(nonce + encrypted + mac).decode("ascii")
         return f"{self.provider}:{payload}"
 
     def decrypt(self, ciphertext: str) -> str:
-        if not ciphertext.startswith(f"{self.provider}:"):
+        prefix = f"{self.provider}:"
+        if not ciphertext.startswith(prefix):
             raise ValueError("CIPHERTEXT_PROVIDER_MISMATCH")
-        encoded = ciphertext.split(":", 1)[1]
+        encoded = ciphertext[len(prefix):]
         payload = base64.b64decode(encoded.encode("ascii"))
         if len(payload) < 48:
             raise ValueError("CIPHERTEXT_INVALID")
         nonce = payload[:16]
         mac = payload[-32:]
         encrypted = payload[16:-32]
+        if not self.secret_key:
+            raise ValueError("MISSING_CONFIDENTIAL_COMPUTE_KEY")
         key = self.secret_key.encode("utf-8")
         expected_mac = hmac.new(key, nonce + encrypted, hashlib.sha256).digest()
         if not hmac.compare_digest(mac, expected_mac):

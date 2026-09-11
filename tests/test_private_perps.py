@@ -18,7 +18,7 @@ from private_perps.storage.encrypted_position_store import EncryptedPositionStor
 
 class PrivatePerpsPhase9Tests(unittest.TestCase):
     def setUp(self) -> None:
-        self.compute = InMemoryPrivateExecutionAdapter()
+        self.compute = InMemoryPrivateExecutionAdapter(secret_key="test-phase9-key")
         self.store = EncryptedPositionStore(self.compute)
         self.gateway = PrivateOrderGateway(
             position_engine=PositionEngine(self.store),
@@ -108,6 +108,9 @@ class PrivatePerpsPhase9Tests(unittest.TestCase):
         )
         self.assertEqual(short_result.status, LifecycleStage.SETTLEMENT_PREPARED)
         self.assertEqual(short_result.settlement_delta, 1.0 * 50000.0 * 0.0001)
+        short_version = self.store.get_latest(short_result.position_id)
+        payload = self.store.decrypt_version(short_version, authorization_id="auth-1")
+        self.assertGreater(payload["liquidation_threshold"], payload["entry_price"])
 
     def test_missing_authority_rejected(self):
         bad_intent = self.intent(authority=self.authority(mandateId=""))
