@@ -14,4 +14,4 @@
 
 Failure states: `REJECTED`, `EXPIRED`, `PROOF_FAILED`, `ORACLE_INVALID`, `MARGIN_INSUFFICIENT`, `PARTIAL`, `DISPUTED`, `MANUAL_REVIEW`.
 
-The gateway enforces fail-closed authority linkage (intent/mandate/policy/risk/authorization), privacy mode checks, policy hash matching, and deterministic oracle/margin/proof gates before settlement preparation.
+The gateway enforces fail-closed authority linkage (intent/mandate/policy/risk/authorization), confidential-mode checks, policy hash matching, and deterministic oracle/margin/proof gates before settlement preparation.

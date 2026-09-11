@@ -135,6 +135,17 @@ class PrivatePerpsPhase9Tests(unittest.TestCase):
         self.assertEqual(result.status, LifecycleStage.REJECTED)
         self.assertEqual(result.rejection_reason, "UNSUPPORTED_PRIVACY_MODE")
 
+    def test_private_mode_rejected_for_confidential_gateway(self):
+        bad_intent = self.intent(authority=self.authority(privacyMode=PrivacyMode.PRIVATE))
+        result = self.gateway.process_confidential_order(
+            intent=bad_intent,
+            oracle_observation=self.oracle(),
+            proof_id="proof-ok",
+            funding_rate_per_interval=0.0001,
+        )
+        self.assertEqual(result.status, LifecycleStage.REJECTED)
+        self.assertEqual(result.rejection_reason, "UNSUPPORTED_PRIVACY_MODE")
+
     def test_insufficient_margin_rejected(self):
         result = self.gateway.process_confidential_order(
             intent=self.intent(collateral=100.0),
@@ -143,6 +154,8 @@ class PrivatePerpsPhase9Tests(unittest.TestCase):
             funding_rate_per_interval=0.0001,
         )
         self.assertEqual(result.status, LifecycleStage.MARGIN_INSUFFICIENT)
+        self.assertIsNotNone(result.liquidation_decision)
+        self.assertTrue(result.liquidation_decision.should_liquidate)
 
     def test_invalid_proof_rejected(self):
         result = self.gateway.process_confidential_order(

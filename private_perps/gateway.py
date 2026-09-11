@@ -54,9 +54,9 @@ class PrivateOrderGateway:
             raise ValueError(f"AUTHORITY_MISSING:{','.join(sorted(missing))}")
         privacy_mode = getattr(intent.authority.privacyMode, "value", None)
         execution_mode = getattr(intent.authority.executionMode, "value", None)
-        if privacy_mode not in {"CONFIDENTIAL", "PRIVATE"}:
+        if privacy_mode != "CONFIDENTIAL":
             raise ValueError("UNSUPPORTED_PRIVACY_MODE")
-        if execution_mode not in {"CONFIDENTIAL", "PRIVATE"}:
+        if execution_mode != "CONFIDENTIAL":
             raise ValueError("UNSUPPORTED_EXECUTION_MODE")
         expected_hash = self._policy_hashes_by_version.get(intent.authority.policyVersion)
         if expected_hash is None or expected_hash != intent.authority.policyHash:
@@ -94,11 +94,24 @@ class PrivateOrderGateway:
 
         margin: MarginResult = self._margin_engine.evaluate(intent)
         if not margin.is_sufficient:
+            liquidation_proof_result = None
+            if intent.requires_proof and proof_id is not None:
+                liquidation_proof_result = self._proof_adapter.verify(
+                    proof_id=proof_id,
+                    proof_type="LIQUIDATION_SOLVENCY",
+                    commitment_hash=f"margin:{intent.order_id}",
+                )
+            liquidation_decision = self._liquidation_engine.evaluate(
+                margin_result=margin,
+                proof_result=liquidation_proof_result,
+            )
             return GatewayResult(
                 order_id=intent.order_id,
                 status=LifecycleStage.MARGIN_INSUFFICIENT,
                 stages=stages + [LifecycleStage.MARGIN_INSUFFICIENT],
                 rejection_reason="MARGIN_INSUFFICIENT",
+                liquidation_decision=liquidation_decision,
+                proof_result=liquidation_proof_result,
             )
         stages.append(LifecycleStage.MARGIN_VALIDATED)
 
