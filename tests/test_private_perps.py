@@ -97,7 +97,17 @@ class PrivatePerpsPhase9Tests(unittest.TestCase):
         self.assertIn(LifecycleStage.PROOF_VERIFIED, result.stages)
         self.assertTrue(result.position_id)
         self.assertTrue(result.commitment_hash)
-        self.assertEqual(result.settlement_delta, 1.0 * 50000.0 * 0.0001)
+        self.assertEqual(result.settlement_delta, -1.0 * 50000.0 * 0.0001)
+
+    def test_funding_delta_side_dependent(self):
+        short_result = self.gateway.process_confidential_order(
+            intent=self.intent(order_id="ord-short", side="SHORT"),
+            oracle_observation=self.oracle(),
+            proof_id="proof-ok",
+            funding_rate_per_interval=0.0001,
+        )
+        self.assertEqual(short_result.status, LifecycleStage.SETTLEMENT_PREPARED)
+        self.assertEqual(short_result.settlement_delta, 1.0 * 50000.0 * 0.0001)
 
     def test_missing_authority_rejected(self):
         bad_intent = self.intent(authority=self.authority(mandateId=""))

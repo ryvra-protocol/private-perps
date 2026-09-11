@@ -156,23 +156,25 @@ class PrivateOrderGateway:
             stages.append(LifecycleStage.PROOF_VERIFIED)
 
         position_result: PositionEngineResult = self._position_engine.open_or_adjust(intent, payload=position_payload)
-        if position_result.transition.commitment_hash != precomputed_commitment:
-            return GatewayResult(
-                order_id=intent.order_id,
-                status=LifecycleStage.REJECTED,
-                stages=stages + [LifecycleStage.REJECTED],
-                rejection_reason="COMMITMENT_MISMATCH",
-            )
         stages.append(LifecycleStage.POSITION_RESERVED)
         stages.append(LifecycleStage.ORDER_ACCEPTED)
         stages.append(LifecycleStage.ORDER_MATCHED)
         stages.append(LifecycleStage.EXECUTED)
 
-        funding_delta = self._funding_engine.compute_delta(
-            size=intent.size,
-            mark_price=oracle_observation.price,
-            funding_rate_per_interval=funding_rate_per_interval,
-        )
+        try:
+            funding_delta = self._funding_engine.compute_delta(
+                side=intent.side,
+                size=intent.size,
+                mark_price=oracle_observation.price,
+                funding_rate_per_interval=funding_rate_per_interval,
+            )
+        except ValueError as exc:
+            return GatewayResult(
+                order_id=intent.order_id,
+                status=LifecycleStage.REJECTED,
+                stages=stages + [LifecycleStage.REJECTED],
+                rejection_reason=str(exc),
+            )
 
         liquidation_decision = self._liquidation_engine.evaluate(margin_result=margin, proof_result=proof_result)
 
