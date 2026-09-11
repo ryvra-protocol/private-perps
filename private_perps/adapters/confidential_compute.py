@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass
 import hashlib
+import hmac
 import secrets
 
 
@@ -39,7 +40,9 @@ class InMemoryPrivateExecutionAdapter(ConfidentialComputeAdapter):
         nonce = secrets.token_bytes(16)
         keystream = self._keystream(nonce, len(data))
         encrypted = bytes(a ^ b for a, b in zip(data, keystream))
-        payload = base64.b64encode(nonce + encrypted).decode("ascii")
+        key = self.secret_key.encode("utf-8")
+        mac = hmac.new(key, nonce + encrypted, hashlib.sha256).digest()
+        payload = base64.b64encode(nonce + encrypted + mac).decode("ascii")
         return f"{self.provider}:{payload}"
 
     def decrypt(self, ciphertext: str) -> str:
@@ -47,9 +50,15 @@ class InMemoryPrivateExecutionAdapter(ConfidentialComputeAdapter):
             raise ValueError("CIPHERTEXT_PROVIDER_MISMATCH")
         encoded = ciphertext.split(":", 1)[1]
         payload = base64.b64decode(encoded.encode("ascii"))
-        if len(payload) < 16:
+        if len(payload) < 48:
             raise ValueError("CIPHERTEXT_INVALID")
-        nonce, encrypted = payload[:16], payload[16:]
+        nonce = payload[:16]
+        mac = payload[-32:]
+        encrypted = payload[16:-32]
+        key = self.secret_key.encode("utf-8")
+        expected_mac = hmac.new(key, nonce + encrypted, hashlib.sha256).digest()
+        if not hmac.compare_digest(mac, expected_mac):
+            raise ValueError("CIPHERTEXT_AUTH_FAILED")
         keystream = self._keystream(nonce, len(encrypted))
         data = bytes(a ^ b for a, b in zip(encrypted, keystream))
         return data.decode("utf-8")

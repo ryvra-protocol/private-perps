@@ -97,7 +97,7 @@ class PrivatePerpsPhase9Tests(unittest.TestCase):
         self.assertIn(LifecycleStage.PROOF_VERIFIED, result.stages)
         self.assertTrue(result.position_id)
         self.assertTrue(result.commitment_hash)
-        self.assertEqual(result.settlement_delta, (1.0 * 50000.0) + (1.0 * 50000.0 * 0.0001))
+        self.assertEqual(result.settlement_delta, 1.0 * 50000.0 * 0.0001)
 
     def test_missing_authority_rejected(self):
         bad_intent = self.intent(authority=self.authority(mandateId=""))
@@ -156,6 +156,16 @@ class PrivatePerpsPhase9Tests(unittest.TestCase):
         self.assertEqual(result.status, LifecycleStage.MARGIN_INSUFFICIENT)
         self.assertIsNotNone(result.liquidation_decision)
         self.assertTrue(result.liquidation_decision.should_liquidate)
+
+    def test_unsupported_collateral_rejected(self):
+        result = self.gateway.process_confidential_order(
+            intent=self.intent(collateral_asset="UNKNOWN"),
+            oracle_observation=self.oracle(),
+            proof_id="proof-ok",
+            funding_rate_per_interval=0.0001,
+        )
+        self.assertEqual(result.status, LifecycleStage.REJECTED)
+        self.assertEqual(result.rejection_reason, "UNSUPPORTED_COLLATERAL_ASSET")
 
     def test_invalid_proof_rejected(self):
         result = self.gateway.process_confidential_order(

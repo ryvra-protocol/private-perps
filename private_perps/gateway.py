@@ -92,7 +92,15 @@ class PrivateOrderGateway:
                 rejection_reason=str(exc),
             )
 
-        margin: MarginResult = self._margin_engine.evaluate(intent)
+        try:
+            margin: MarginResult = self._margin_engine.evaluate(intent)
+        except ValueError as exc:
+            return GatewayResult(
+                order_id=intent.order_id,
+                status=LifecycleStage.REJECTED,
+                stages=stages + [LifecycleStage.REJECTED],
+                rejection_reason=str(exc),
+            )
         if not margin.is_sufficient:
             liquidation_proof_result = None
             if intent.requires_proof and proof_id is not None:
@@ -169,7 +177,7 @@ class PrivateOrderGateway:
         liquidation_decision = self._liquidation_engine.evaluate(margin_result=margin, proof_result=proof_result)
 
         settlement_id = f"set-{intent.order_id}"
-        settlement_delta = (intent.size * oracle_observation.price) + funding_delta
+        settlement_delta = funding_delta
         self._settlement_adapter.prepare_record(
             settlement_id=settlement_id,
             order_id=intent.order_id,
