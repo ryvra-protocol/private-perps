@@ -1,0 +1,168 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from private_perps.adapters.oracle import OracleAdapter, OracleValidationError
+from private_perps.adapters.settlement import SettlementAdapter
+from private_perps.adapters.zk_proof import ZKProofAdapter
+from private_perps.engines.funding import FundingEngine
+from private_perps.engines.liquidation import LiquidationDecision, LiquidationEngine
+from private_perps.engines.margin import MarginEngine, MarginResult
+from private_perps.engines.position import PositionEngine, PositionEngineResult
+from private_perps.models import LifecycleStage, OracleObservation, ProofVerificationResult, TradeIntent, VerificationStatus
+
+
+@dataclass(frozen=True)
+class GatewayResult:
+    order_id: str
+    status: LifecycleStage
+    stages: list[LifecycleStage]
+    position_id: str | None = None
+    commitment_hash: str | None = None
+    settlement_id: str | None = None
+    rejection_reason: str | None = None
+    proof_result: ProofVerificationResult | None = None
+    liquidation_decision: LiquidationDecision | None = None
+
+
+class PrivateOrderGateway:
+    def __init__(
+        self,
+        *,
+        position_engine: PositionEngine,
+        margin_engine: MarginEngine,
+        funding_engine: FundingEngine,
+        liquidation_engine: LiquidationEngine,
+        oracle_adapter: OracleAdapter,
+        proof_adapter: ZKProofAdapter,
+        settlement_adapter: SettlementAdapter,
+        policy_hashes_by_version: dict[str, str],
+    ):
+        self._position_engine = position_engine
+        self._margin_engine = margin_engine
+        self._funding_engine = funding_engine
+        self._liquidation_engine = liquidation_engine
+        self._oracle_adapter = oracle_adapter
+        self._proof_adapter = proof_adapter
+        self._settlement_adapter = settlement_adapter
+        self._policy_hashes_by_version = policy_hashes_by_version
+
+    def _validate_authority(self, intent: TradeIntent) -> None:
+        missing = intent.authority.missing_fields()
+        if missing:
+            raise ValueError(f"AUTHORITY_MISSING:{','.join(sorted(missing))}")
+        if intent.authority.privacyMode.value not in {"CONFIDENTIAL", "PRIVATE"}:
+            raise ValueError("UNSUPPORTED_PRIVACY_MODE")
+        if intent.authority.executionMode.value not in {"CONFIDENTIAL", "PRIVATE"}:
+            raise ValueError("UNSUPPORTED_EXECUTION_MODE")
+        expected_hash = self._policy_hashes_by_version.get(intent.authority.policyVersion)
+        if expected_hash is None or expected_hash != intent.authority.policyHash:
+            raise ValueError("POLICY_MISMATCH")
+
+    def process_confidential_order(
+        self,
+        *,
+        intent: TradeIntent,
+        oracle_observation: OracleObservation,
+        proof_id: str | None,
+        funding_rate_per_interval: float,
+    ) -> GatewayResult:
+        stages: list[LifecycleStage] = [LifecycleStage.INTENT_RECEIVED]
+        try:
+            self._validate_authority(intent)
+        except ValueError as exc:
+            return GatewayResult(
+                order_id=intent.order_id,
+                status=LifecycleStage.REJECTED,
+                stages=stages + [LifecycleStage.REJECTED],
+                rejection_reason=str(exc),
+            )
+        stages.append(LifecycleStage.AUTHORITY_VALIDATED)
+
+        try:
+            self._oracle_adapter.validate(oracle_observation)
+        except OracleValidationError as exc:
+            return GatewayResult(
+                order_id=intent.order_id,
+                status=LifecycleStage.ORACLE_INVALID,
+                stages=stages + [LifecycleStage.ORACLE_INVALID],
+                rejection_reason=str(exc),
+            )
+
+        margin: MarginResult = self._margin_engine.evaluate(intent)
+        if not margin.is_sufficient:
+            return GatewayResult(
+                order_id=intent.order_id,
+                status=LifecycleStage.MARGIN_INSUFFICIENT,
+                stages=stages + [LifecycleStage.MARGIN_INSUFFICIENT],
+                rejection_reason="MARGIN_INSUFFICIENT",
+            )
+        stages.append(LifecycleStage.MARGIN_VALIDATED)
+
+        position_result: PositionEngineResult = self._position_engine.open_or_adjust(intent)
+        stages.append(LifecycleStage.POSITION_RESERVED)
+        stages.append(LifecycleStage.ORDER_ACCEPTED)
+        stages.append(LifecycleStage.ORDER_MATCHED)
+        stages.append(LifecycleStage.EXECUTED)
+
+        proof_result = None
+        if intent.requires_proof:
+            stages.append(LifecycleStage.PROOF_GENERATED)
+            if proof_id is None:
+                return GatewayResult(
+                    order_id=intent.order_id,
+                    status=LifecycleStage.PROOF_FAILED,
+                    stages=stages + [LifecycleStage.PROOF_FAILED],
+                    position_id=position_result.transition.position_id,
+                    commitment_hash=position_result.transition.commitment_hash,
+                    rejection_reason="PROOF_REQUIRED",
+                )
+            proof_result = self._proof_adapter.verify(
+                proof_id=proof_id,
+                proof_type="POSITION_TRANSITION",
+                commitment_hash=position_result.transition.commitment_hash,
+            )
+            if proof_result.status != VerificationStatus.VERIFIED:
+                return GatewayResult(
+                    order_id=intent.order_id,
+                    status=LifecycleStage.PROOF_FAILED,
+                    stages=stages + [LifecycleStage.PROOF_FAILED],
+                    position_id=position_result.transition.position_id,
+                    commitment_hash=position_result.transition.commitment_hash,
+                    proof_result=proof_result,
+                    rejection_reason=proof_result.reason_code,
+                )
+            stages.append(LifecycleStage.PROOF_VERIFIED)
+
+        _ = self._funding_engine.compute_delta(
+            size=intent.size,
+            mark_price=oracle_observation.price,
+            funding_rate_per_interval=funding_rate_per_interval,
+        )
+
+        liquidation_decision = self._liquidation_engine.evaluate(margin_result=margin, proof_result=proof_result)
+
+        settlement_id = f"set-{intent.order_id}"
+        self._settlement_adapter.prepare_record(
+            settlement_id=settlement_id,
+            order_id=intent.order_id,
+            account_id=intent.account_id,
+            position_id=position_result.transition.position_id,
+            settlement_delta=intent.size * oracle_observation.price,
+            authority=intent.authority,
+            commitment_hash=position_result.transition.commitment_hash,
+            proof_id=proof_result.proof_id if proof_result else None,
+            proof_status=proof_result.status.value if proof_result else None,
+        )
+        stages.append(LifecycleStage.SETTLEMENT_PREPARED)
+
+        return GatewayResult(
+            order_id=intent.order_id,
+            status=LifecycleStage.SETTLEMENT_PREPARED,
+            stages=stages,
+            position_id=position_result.transition.position_id,
+            commitment_hash=position_result.transition.commitment_hash,
+            settlement_id=settlement_id,
+            proof_result=proof_result,
+            liquidation_decision=liquidation_decision,
+        )
