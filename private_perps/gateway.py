@@ -51,9 +51,11 @@ class PrivateOrderGateway:
         missing = intent.authority.missing_fields()
         if missing:
             raise ValueError(f"AUTHORITY_MISSING:{','.join(sorted(missing))}")
-        if intent.authority.privacyMode.value not in {"CONFIDENTIAL", "PRIVATE"}:
+        privacy_mode = getattr(intent.authority.privacyMode, "value", None)
+        execution_mode = getattr(intent.authority.executionMode, "value", None)
+        if privacy_mode not in {"CONFIDENTIAL", "PRIVATE"}:
             raise ValueError("UNSUPPORTED_PRIVACY_MODE")
-        if intent.authority.executionMode.value not in {"CONFIDENTIAL", "PRIVATE"}:
+        if execution_mode not in {"CONFIDENTIAL", "PRIVATE"}:
             raise ValueError("UNSUPPORTED_EXECUTION_MODE")
         expected_hash = self._policy_hashes_by_version.get(intent.authority.policyVersion)
         if expected_hash is None or expected_hash != intent.authority.policyHash:
@@ -99,11 +101,8 @@ class PrivateOrderGateway:
             )
         stages.append(LifecycleStage.MARGIN_VALIDATED)
 
-        position_result: PositionEngineResult = self._position_engine.open_or_adjust(intent)
-        stages.append(LifecycleStage.POSITION_RESERVED)
-        stages.append(LifecycleStage.ORDER_ACCEPTED)
-        stages.append(LifecycleStage.ORDER_MATCHED)
-        stages.append(LifecycleStage.EXECUTED)
+        position_payload = self._position_engine.build_payload(intent)
+        precomputed_commitment = self._position_engine.commitment_for_payload(position_payload)
 
         proof_result = None
         if intent.requires_proof:
@@ -113,26 +112,39 @@ class PrivateOrderGateway:
                     order_id=intent.order_id,
                     status=LifecycleStage.PROOF_FAILED,
                     stages=stages + [LifecycleStage.PROOF_FAILED],
-                    position_id=position_result.transition.position_id,
-                    commitment_hash=position_result.transition.commitment_hash,
+                    position_id=position_payload["position_id"],
+                    commitment_hash=precomputed_commitment,
                     rejection_reason="PROOF_REQUIRED",
                 )
             proof_result = self._proof_adapter.verify(
                 proof_id=proof_id,
                 proof_type="POSITION_TRANSITION",
-                commitment_hash=position_result.transition.commitment_hash,
+                commitment_hash=precomputed_commitment,
             )
             if proof_result.status != VerificationStatus.VERIFIED:
                 return GatewayResult(
                     order_id=intent.order_id,
                     status=LifecycleStage.PROOF_FAILED,
                     stages=stages + [LifecycleStage.PROOF_FAILED],
-                    position_id=position_result.transition.position_id,
-                    commitment_hash=position_result.transition.commitment_hash,
+                    position_id=position_payload["position_id"],
+                    commitment_hash=precomputed_commitment,
                     proof_result=proof_result,
                     rejection_reason=proof_result.reason_code,
                 )
             stages.append(LifecycleStage.PROOF_VERIFIED)
+
+        position_result: PositionEngineResult = self._position_engine.open_or_adjust(intent, payload=position_payload)
+        if position_result.transition.commitment_hash != precomputed_commitment:
+            return GatewayResult(
+                order_id=intent.order_id,
+                status=LifecycleStage.REJECTED,
+                stages=stages + [LifecycleStage.REJECTED],
+                rejection_reason="COMMITMENT_MISMATCH",
+            )
+        stages.append(LifecycleStage.POSITION_RESERVED)
+        stages.append(LifecycleStage.ORDER_ACCEPTED)
+        stages.append(LifecycleStage.ORDER_MATCHED)
+        stages.append(LifecycleStage.EXECUTED)
 
         _ = self._funding_engine.compute_delta(
             size=intent.size,

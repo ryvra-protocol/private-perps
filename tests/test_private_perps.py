@@ -152,6 +152,7 @@ class PrivatePerpsPhase9Tests(unittest.TestCase):
         )
         self.assertEqual(result.status, LifecycleStage.PROOF_FAILED)
         self.assertEqual(result.rejection_reason, "PROOF_INVALID")
+        self.assertEqual(self.store.get_history("pos-acct-1-BTC-PERP"), [])
 
     def test_proof_required_blocked_without_proof(self):
         result = self.gateway.process_confidential_order(
@@ -162,6 +163,7 @@ class PrivatePerpsPhase9Tests(unittest.TestCase):
         )
         self.assertEqual(result.status, LifecycleStage.PROOF_FAILED)
         self.assertEqual(result.rejection_reason, "PROOF_REQUIRED")
+        self.assertEqual(self.store.get_history("pos-acct-1-BTC-PERP"), [])
 
     def test_stale_oracle_rejected(self):
         result = self.gateway.process_confidential_order(
